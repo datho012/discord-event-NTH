@@ -244,80 +244,119 @@ client.on('interactionCreate', async interaction => {
 
   const { commandName } = interaction;
 
-  if (commandName === 'setsyncchannel') {
-    const channel = interaction.options.getChannel('channel');
-    
-    // Check if it's a text channel (type 0 is GuildText)
-    if (channel.type !== 0) {
+  try {
+    if (commandName === 'setsyncchannel') {
+      const channel = interaction.options.getChannel('channel');
+      
+      // Check if it's a text channel (type 0 is GuildText)
+      if (channel.type !== 0) {
+        return interaction.reply({
+          content: '❌ Vui lòng chọn một **kênh văn bản** (Text Channel).',
+          ephemeral: true
+        });
+      }
+
+      saveConfig({ channelId: channel.id });
+      
       return interaction.reply({
-        content: '❌ Vui lòng chọn một **kênh văn bản** (Text Channel).',
-        ephemeral: true
+        content: `✅ Đã thiết lập kênh thông báo tin tức là <#${channel.id}>. Các sự kiện mới sẽ tự động được gửi vào đây!`,
+        ephemeral: false
       });
     }
 
-    saveConfig({ channelId: channel.id });
-    
-    return interaction.reply({
-      content: `✅ Đã thiết lập kênh thông báo tin tức là <#${channel.id}>. Các sự kiện mới sẽ tự động được gửi vào đây!`,
-      ephemeral: false
-    });
-  }
-
-  if (commandName === 'checknews') {
-    await interaction.deferReply();
-    
-    try {
-      const result = await checkAndAnnounceNews(true);
-      const channelId = getAnnouncementChannelId();
-      
-      let replyMessage = `🔍 Đã hoàn thành kiểm tra tin tức!\n- Tìm thấy tổng cộng: **${result.checked}** bài viết trên trang chủ.`;
-      
-      if (!channelId) {
-        replyMessage += `\n⚠️ **Cảnh báo**: Chưa cấu hình kênh thông báo. Hãy dùng lệnh \`/setsyncchannel\` hoặc cấu hình trong file \`.env\` để nhận thông báo.`;
-      } else {
-        replyMessage += `\n- Số bài đăng mới đã được gửi: **${result.posted}**`;
+    if (commandName === 'checknews') {
+      // Wrap deferReply to capture temporary 503 or network errors
+      try {
+        await interaction.deferReply();
+      } catch (deferError) {
+        console.error('[Lỗi Tương Tác] Không thể deferReply lệnh /checknews:', deferError.message);
+        return; // Exit early as we cannot interact with this interaction anymore
       }
+      
+      try {
+        const result = await checkAndAnnounceNews(true);
+        const channelId = getAnnouncementChannelId();
+        
+        let replyMessage = `🔍 Đã hoàn thành kiểm tra tin tức!\n- Tìm thấy tổng cộng: **${result.checked}** bài viết trên trang chủ.`;
+        
+        if (!channelId) {
+          replyMessage += `\n⚠️ **Cảnh báo**: Chưa cấu hình kênh thông báo. Hãy dùng lệnh \`/setsyncchannel\` hoặc cấu hình trong file \`.env\` để nhận thông báo.`;
+        } else {
+          replyMessage += `\n- Số bài đăng mới đã được gửi: **${result.posted}**`;
+        }
 
-      await interaction.editReply({ content: replyMessage });
-    } catch (error) {
-      await interaction.editReply({ content: `❌ Đã xảy ra lỗi khi kiểm tra tin tức: ${error.message}` });
+        await interaction.editReply({ content: replyMessage });
+      } catch (error) {
+        console.error('[Lỗi Lệnh] Lỗi khi thực hiện /checknews:', error.message);
+        try {
+          await interaction.editReply({ content: `❌ Đã xảy ra lỗi khi kiểm tra tin tức: ${error.message}` });
+        } catch (replyError) {
+          console.error('[Lỗi Tương Tác] Không thể gửi thông báo lỗi đến tương tác:', replyError.message);
+        }
+      }
+    }
+
+    if (commandName === 'status') {
+      const channelId = getAnnouncementChannelId();
+      const sentArticles = loadSentArticles();
+      
+      const statusEmbed = new EmbedBuilder()
+        .setTitle('⚙️ Trạng thái hoạt động của Bot Tin tức')
+        .setColor('#E5C158')
+        .addFields(
+          { 
+            name: 'Kênh thông báo', 
+            value: channelId ? `<#${channelId}>` : '❌ Chưa cấu hình (Dùng `/setsyncchannel` hoặc .env)', 
+            inline: false 
+          },
+          { 
+            name: 'Tần suất kiểm tra', 
+            value: `Mỗi **${checkIntervalHours}** giờ`, 
+            inline: true 
+          },
+          { 
+            name: 'Lần kiểm tra cuối', 
+            value: lastCheckTime ? `🕒 ${lastCheckTime.toLocaleString()}` : 'Chưa kiểm tra lần nào', 
+            inline: true 
+          },
+          { 
+            name: 'Số bài viết đã lưu trữ', 
+            value: `📂 ${sentArticles.length} bài viết`, 
+            inline: true 
+          }
+        )
+        .setFooter({ text: 'Bot đang hoạt động ổn định' })
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [statusEmbed] });
+    }
+  } catch (error) {
+    console.error(`[Lỗi Tương Tác] Lỗi không mong muốn khi xử lý lệnh /${commandName}:`, error);
+    try {
+      if (interaction.deferred) {
+        await interaction.editReply({ content: `❌ Đã xảy ra lỗi hệ thống: ${error.message}` });
+      } else if (!interaction.replied) {
+        await interaction.reply({ content: `❌ Đã xảy ra lỗi hệ thống: ${error.message}`, ephemeral: true });
+      }
+    } catch (replyError) {
+      console.error('[Lỗi Tương Tác] Không thể phản hồi lỗi tương tác:', replyError.message);
     }
   }
+});
 
-  if (commandName === 'status') {
-    const channelId = getAnnouncementChannelId();
-    const sentArticles = loadSentArticles();
-    
-    const statusEmbed = new EmbedBuilder()
-      .setTitle('⚙️ Trạng thái hoạt động của Bot Tin tức')
-      .setColor('#E5C158')
-      .addFields(
-        { 
-          name: 'Kênh thông báo', 
-          value: channelId ? `<#${channelId}>` : '❌ Chưa cấu hình (Dùng `/setsyncchannel` hoặc .env)', 
-          inline: false 
-        },
-        { 
-          name: 'Tần suất kiểm tra', 
-          value: `Mỗi **${checkIntervalHours}** giờ`, 
-          inline: true 
-        },
-        { 
-          name: 'Lần kiểm tra cuối', 
-          value: lastCheckTime ? `🕒 ${lastCheckTime.toLocaleString()}` : 'Chưa kiểm tra lần nào', 
-          inline: true 
-        },
-        { 
-          name: 'Số bài viết đã lưu trữ', 
-          value: `📂 ${sentArticles.length} bài viết`, 
-          inline: true 
-        }
-      )
-      .setFooter({ text: 'Bot đang hoạt động ổn định' })
-      .setTimestamp();
+// Handle client errors to prevent crashes on network drops
+client.on('error', error => {
+  console.error('[Bot Error] Lỗi kết nối client Discord:', error);
+});
 
-    await interaction.reply({ embeds: [statusEmbed] });
-  }
+// Handle unhandled promise rejections globally
+process.on('unhandledRejection', error => {
+  console.error('[Unhandled Rejection] Phát hiện Promise bị từ chối chưa được xử lý:', error);
+});
+
+// Handle uncaught exceptions globally
+process.on('uncaughtException', error => {
+  console.error('[Uncaught Exception] Phát hiện lỗi chưa được bắt:', error);
 });
 
 // Login Bot
