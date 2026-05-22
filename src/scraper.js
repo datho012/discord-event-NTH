@@ -1,4 +1,5 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const { translate } = require('@vitalets/google-translate-api');
 
 async function scrapeSwordOfJustice(page) {
@@ -88,9 +89,25 @@ async function scrapeNghichThuyHan(page) {
 async function fetchNews() {
   let browser;
   try {
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
+    
+    let executablePath = null;
+    if (isProduction) {
+      executablePath = await chromium.executablePath();
+    } else {
+      executablePath = process.platform === 'win32' 
+        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' 
+        : process.platform === 'linux' 
+          ? '/usr/bin/google-chrome' 
+          : '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    }
+
     browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: isProduction ? chromium.args : [],
+      defaultViewport: isProduction ? chromium.defaultViewport : null,
+      executablePath: executablePath,
+      headless: isProduction ? chromium.headless : true,
+      ignoreHTTPSErrors: true,
     });
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
