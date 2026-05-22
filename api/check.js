@@ -79,11 +79,19 @@ module.exports = async (req, res) => {
             { name: 'Phân loại', value: `📁 ${article.category.toUpperCase()}`, inline: true },
             { name: 'Ngày đăng', value: `📅 ${article.date}`, inline: true }
           )
-          .setTimestamp(new Date())
-          .setFooter({ 
-            text: 'Sword of Justice - Tin tức & Sự kiện NTH', 
+          .setTimestamp(new Date());
+
+        if (article.game === 'Sword of Justice') {
+          embed.setFooter({ 
+            text: 'Sword of Justice - Tin tức & Sự kiện', 
             iconURL: 'https://r.res.easebar.com/pic/20260507/4938db60-811d-429a-8a40-5baa71a49890.png' 
           });
+        } else {
+          embed.setFooter({ 
+            text: 'Nghịch Thủy Hàn - Tin tức & Sự kiện',
+            iconURL: 'https://img.zing.vn/products/gnmobi/skin-2014/images/404-1.png'
+          });
+        }
 
         if (article.imageUrl) {
           embed.setImage(article.imageUrl);
