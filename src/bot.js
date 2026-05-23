@@ -16,7 +16,6 @@ const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
 const guildId = process.env.DISCORD_GUILD_ID;
 const defaultChannelId = process.env.DISCORD_CHANNEL_ID;
-const checkIntervalHours = parseFloat(process.env.CHECK_INTERVAL_HOURS || '24');
 
 if (!token || !clientId || !guildId) {
   console.error('[Lỗi] Thiếu các biến môi trường bắt buộc: DISCORD_TOKEN, DISCORD_CLIENT_ID, hoặc DISCORD_GUILD_ID');
@@ -210,28 +209,9 @@ function setupScheduler() {
     activeCronJob.stop();
   }
 
-  let cronExpression = '0 0 * * *'; // Default once a day at midnight
-  
-  if (checkIntervalHours > 0 && checkIntervalHours <= 23 && Number.isInteger(checkIntervalHours)) {
-    cronExpression = `0 */${checkIntervalHours} * * *`;
-    console.log(`[Scheduler] Đã cài đặt lịch kiểm tra: Mỗi ${checkIntervalHours} giờ một lần (Cron: "${cronExpression}")`);
-  } else if (checkIntervalHours === 24) {
-    cronExpression = '0 0 * * *';
-    console.log(`[Scheduler] Đã cài đặt lịch kiểm tra: Mỗi 24 giờ một lần vào nửa đêm (Cron: "${cronExpression}")`);
-  } else {
-    // If it's an arbitrary decimal value, fall back to setInterval
-    const intervalMs = checkIntervalHours * 60 * 60 * 1000;
-    console.log(`[Scheduler] Đã cài đặt lịch kiểm tra: Mỗi ${checkIntervalHours} giờ sử dụng setInterval (${intervalMs}ms)`);
-    
-    const intervalObj = setInterval(() => {
-      checkAndAnnounceNews().catch(err => console.error('[Scheduler Error] Lỗi kiểm tra tin tức định kỳ:', err.message));
-    }, intervalMs);
-    
-    activeCronJob = {
-      stop: () => clearInterval(intervalObj)
-    };
-    return;
-  }
+  // Tốc độ quét siêu tốc: 10 phút một lần để đảm bảo tin về gần như ngay lập tức
+  const cronExpression = '*/10 * * * *'; 
+  console.log(`[Scheduler] Đã cài đặt lịch kiểm tra siêu tốc: Mỗi 10 phút một lần (Cron: "${cronExpression}")`);
 
   activeCronJob = cron.schedule(cronExpression, () => {
     checkAndAnnounceNews().catch(err => console.error('[Scheduler Error] Lỗi kiểm tra tin tức định kỳ:', err.message));
@@ -311,7 +291,7 @@ client.on('interactionCreate', async interaction => {
           },
           { 
             name: 'Tần suất kiểm tra', 
-            value: `Mỗi **${checkIntervalHours}** giờ`, 
+            value: `Mỗi **10 phút** một lần`, 
             inline: true 
           },
           { 

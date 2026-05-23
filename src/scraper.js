@@ -115,27 +115,14 @@ async function fetchNews() {
         console.error('[Scraper Error]: Nghich Thuy Han failed', e.message);
     }
 
-    // Group to get the latest event for each day, per game
-    const dailyEvents = {};
-    for (const article of extractedArticles) {
-      if (article.date && article.date.includes('-')) {
-        const key = `${article.date}_${article.game}`;
-        if (!dailyEvents[key]) {
-          dailyEvents[key] = article;
-        }
-      }
-    }
-
-    let filteredArticles = Object.values(dailyEvents);
-    filteredArticles.sort((a, b) => b.date.localeCompare(a.date));
-    
-    // Take the events from the 5 most recent days
-    const uniqueDates = [...new Set(filteredArticles.map(a => a.date))];
+    // We want all articles from the 5 most recent days, 
+    // including multiple articles posted on the same day.
+    const uniqueDates = [...new Set(extractedArticles.map(a => a.date).filter(Boolean))];
     uniqueDates.sort((a, b) => b.localeCompare(a));
     const top5Dates = uniqueDates.slice(0, 5);
     
-    filteredArticles = filteredArticles.filter(a => top5Dates.includes(a.date));
-    filteredArticles.sort((a, b) => a.date.localeCompare(b.date));
+    let filteredArticles = extractedArticles.filter(a => top5Dates.includes(a.date));
+    filteredArticles.sort((a, b) => b.date.localeCompare(a.date)); // Newest first
 
     // Translate to Vietnamese (only for Sword of Justice)
     for (const article of filteredArticles) {
