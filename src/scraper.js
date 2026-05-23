@@ -3,7 +3,7 @@ const chromium = require('@sparticuz/chromium');
 const { translate } = require('@vitalets/google-translate-api');
 
 async function scrapeSwordOfJustice(page) {
-    await page.goto('https://www.swordofjustice.com/sea/index.html#/news', { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto('https://www.swordofjustice.com/sea/index.html#/news', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForSelector('.news-list', { timeout: 15000 });
     
     return await page.evaluate(() => {
@@ -38,7 +38,7 @@ async function scrapeSwordOfJustice(page) {
 }
 
 async function scrapeNghichThuyHan(page) {
-    await page.goto('https://nghichthuyhan.vnggames.com/news/danh-sach.1.html', { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto('https://nghichthuyhan.vnggames.com/news/danh-sach.1.html', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForSelector('ul', { timeout: 15000 });
     
     return await page.evaluate(() => {
