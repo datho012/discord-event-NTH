@@ -1,63 +1,69 @@
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
+
 const { translate } = require('@vitalets/google-translate-api');
 
-async function scrapeSwordOfJustice(page) {
-    await page.goto('https://www.swordofjustice.com/sea/index.html#/news', { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForSelector('.news-list', { timeout: 15000 });
-    
-    return await page.evaluate(() => {
+async function scrapeSwordOfJustice() {
+    try {
+      const axios = require('axios');
+      const cheerio = require('cheerio');
+      const res = await axios.get('https://www.swordofjustice.com/sea/news/');
+      const $ = cheerio.load(res.data);
       const items = [];
-      const currentYear = new Date().getFullYear();
       
-      document.querySelectorAll('.news-list li').forEach(li => {
-        const a = li.querySelector('a');
-        if (!a) return;
+      $('.news-list li').each((i, li) => {
+        const a = $(li).find('a');
+        if (!a.length) return;
         
-        const title = a.getAttribute('title') || a.querySelector('.news-title')?.innerText?.trim() || '';
-        const url = a.href;
-        const img = a.querySelector('img')?.src || '';
-        const category = li.querySelector('.tag-blue')?.innerText?.trim() || 'news';
+        const title = a.attr('title') || a.find('h2').text().trim() || '';
+        const url = a.attr('href');
+        const img = a.find('img').attr('src') || '';
         
-        const date0 = li.querySelector('.date0')?.innerText?.trim() || '';
-        const date1 = li.querySelector('.date1')?.innerText?.trim() || '';
-        const date = `${currentYear}-${date0}-${date1}`;
+        const timeElem = a.find('.time');
+        const category = timeElem.find('span').text().trim() || 'news';
+        
+        let dateStr = timeElem.text().replace(category, '').trim();
+        // dateStr is usually like "2026-05-22"
         
         items.push({
           title,
-          description: '',
+          description: a.find('p').text().trim() || '',
           url,
           imageUrl: img,
           category,
-          date,
+          date: dateStr,
           game: 'Sword of Justice'
         });
       });
       return items;
-    });
+    } catch (error) {
+      console.error('[Axios Error] Sword of Justice:', error.message);
+      return [];
+    }
 }
 
-async function scrapeNghichThuyHan(page) {
-    await page.goto('https://nghichthuyhan.vnggames.com/news/danh-sach.1.html', { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForSelector('ul', { timeout: 15000 });
-    
-    return await page.evaluate(() => {
+async function scrapeNghichThuyHan() {
+    try {
+      const axios = require('axios');
+      const cheerio = require('cheerio');
+      const res = await axios.get('https://nghichthuyhan.vnggames.com/news/danh-sach.1.html');
+      const $ = cheerio.load(res.data);
       const items = [];
       
-      document.querySelectorAll('ul li').forEach(li => {
-        const a = li.querySelector('a');
-        if (!a) return;
+      $('ul li').each((i, li) => {
+        const a = $(li).find('a');
+        if (!a.length) return;
         
-        const title = a.getAttribute('title') || a.querySelector('.news-title')?.innerText?.trim() || '';
-        let url = a.href;
+        const title = a.attr('title') || a.find('.news-title').text().trim() || '';
+        let url = a.attr('href');
         if (url && url.startsWith('//')) {
           url = 'https:' + url;
+        } else if (url && url.startsWith('/')) {
+          url = 'https://nghichthuyhan.vnggames.com' + url;
         }
         
-        const img = a.querySelector('.img-container img')?.src || '';
-        const category = li.querySelector('.news-cate .text')?.innerText?.trim() || 'Tin Tức';
+        const img = a.find('.img-container img').attr('src') || '';
+        const category = $(li).find('.news-cate .text').text().trim() || 'Tin Tức';
         
-        const timeText = li.querySelector('.news-cate .time')?.innerText?.trim() || '';
+        const timeText = $(li).find('.news-cate .time').text().trim() || '';
         let date = '';
         if (timeText) {
           // format: DD/MM/YYYY
@@ -80,43 +86,22 @@ async function scrapeNghichThuyHan(page) {
         }
       });
       return items;
-    });
+    } catch (error) {
+      console.error('[Axios Error] Nghich Thuy Han:', error.message);
+      return [];
+    }
 }
 
 /**
  * Fetches and parses news from both games
  */
 async function fetchNews() {
-  let browser;
   try {
-    const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
-    
-    let executablePath = null;
-    if (isProduction) {
-      executablePath = await chromium.executablePath();
-    } else {
-      executablePath = process.platform === 'win32' 
-        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' 
-        : process.platform === 'linux' 
-          ? '/usr/bin/google-chrome' 
-          : '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-    }
-
-    browser = await puppeteer.launch({
-      args: isProduction ? chromium.args : [],
-      defaultViewport: isProduction ? chromium.defaultViewport : null,
-      executablePath: executablePath,
-      headless: isProduction ? chromium.headless : true,
-      ignoreHTTPSErrors: true,
-    });
-    const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    
     const extractedArticles = [];
     
     // Scrape Sword of Justice
     try {
-        const sojArticles = await scrapeSwordOfJustice(page);
+        const sojArticles = await scrapeSwordOfJustice();
         extractedArticles.push(...sojArticles);
     } catch (e) {
         console.error('[Scraper Error]: Sword of Justice failed', e.message);
@@ -124,13 +109,11 @@ async function fetchNews() {
     
     // Scrape Nghich Thuy Han
     try {
-        const nthArticles = await scrapeNghichThuyHan(page);
+        const nthArticles = await scrapeNghichThuyHan();
         extractedArticles.push(...nthArticles);
     } catch (e) {
         console.error('[Scraper Error]: Nghich Thuy Han failed', e.message);
     }
-
-    await browser.close();
 
     // Group to get the latest event for each day, per game
     const dailyEvents = {};
@@ -174,7 +157,6 @@ async function fetchNews() {
 
     return filteredArticles;
   } catch (error) {
-    if (browser) await browser.close();
     console.error('[Scraper Error]: Failed to fetch news:', error.message);
     throw error;
   }
