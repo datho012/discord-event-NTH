@@ -1,6 +1,28 @@
 
 const { translate } = require('@vitalets/google-translate-api');
 
+const translationCache = new Map();
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function safeTranslate(text, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await sleep(1000 * (i + 1)); // 1s, 2s, 3s
+      const result = await translate(text, { to: 'vi' });
+      return result.text;
+    } catch (err) {
+      if ((err.name === 'TooManyRequestsError' || err.message.includes('Too Many Requests')) && i < retries - 1) {
+        console.warn(`[Translate] Rate limited, retry ${i + 1}/${retries}...`);
+        await sleep(5000 * (i + 1)); // backoff 5s, 10s, 15s
+        continue;
+      }
+      console.error('[Translate] Failed:', err.message);
+      return text; // fallback: trả về text gốc
+    }
+  }
+}
+
 async function scrapeSwordOfJustice() {
     try {
       const axios = require('axios');
@@ -127,17 +149,21 @@ async function fetchNews() {
     // Translate to Vietnamese (only for Sword of Justice)
     for (const article of filteredArticles) {
       if (article.game === 'Sword of Justice') {
-          try {
-            const translatedTitle = await translate(article.title, { to: 'vi' });
-            article.title = translatedTitle.text;
-            
-            if (article.category.toLowerCase().includes('announcement')) {
-              article.category = 'Thông báo';
-            } else {
-              article.category = 'Tin tức';
+          const originalTitle = article.title;
+          if (translationCache.has(originalTitle)) {
+            article.title = translationCache.get(originalTitle);
+          } else {
+            const translatedText = await safeTranslate(originalTitle);
+            article.title = translatedText;
+            if (translatedText !== originalTitle) {
+                translationCache.set(originalTitle, translatedText);
             }
-          } catch (err) {
-            console.error('[Translation Error]:', err.message);
+          }
+          
+          if (article.category.toLowerCase().includes('announcement')) {
+            article.category = 'Thông báo';
+          } else {
+            article.category = 'Tin tức';
           }
       }
     }

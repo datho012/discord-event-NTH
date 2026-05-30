@@ -11,19 +11,27 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 /**
- * Loads dynamic configuration (e.g. channel ID).
- * @returns {{channelId: string|null}}
+ * Loads dynamic configuration (e.g. channel IDs).
+ * @returns {{channelIds: string[]}}
  */
 function loadConfig() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const data = fs.readFileSync(CONFIG_PATH, 'utf8');
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      // Migrate old 'channelId' string to 'channelIds' array
+      if (parsed.channelId && !parsed.channelIds) {
+        parsed.channelIds = [parsed.channelId];
+        delete parsed.channelId;
+        saveConfig(parsed);
+      }
+      if (!parsed.channelIds) parsed.channelIds = [];
+      return parsed;
     }
   } catch (error) {
     console.error('[Database Error]: Failed to load config.json:', error.message);
   }
-  return { channelId: null };
+  return { channelIds: [] };
 }
 
 /**

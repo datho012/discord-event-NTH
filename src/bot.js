@@ -35,19 +35,19 @@ let lastCheckTime = null;
 let activeCronJob = null;
 
 /**
- * Gets the channel where announcements should be posted.
- * Returns either the dynamically configured channel or the default channel from environment variables.
- * @returns {string|null}
+ * Gets the channels where announcements should be posted.
+ * Returns an array of dynamically configured channels, plus the default channel from environment variables if present.
+ * @returns {string[]}
  */
-function getAnnouncementChannelId() {
+function getAnnouncementChannelIds() {
   const dynamicConfig = loadConfig();
-  if (dynamicConfig.channelId) {
-    return dynamicConfig.channelId;
-  }
+  const channels = new Set(dynamicConfig.channelIds || []);
+  
   if (defaultChannelId) {
-    return defaultChannelId;
+    channels.add(defaultChannelId);
   }
-  return null;
+  
+  return Array.from(channels);
 }
 
 /**
@@ -90,10 +90,10 @@ async function checkAndAnnounceNews(forceCheck = false) {
   lastCheckTime = new Date();
   console.log(`[${lastCheckTime.toLocaleString()}] Đang kiểm tra tin tức & sự kiện mới...`);
 
-  const channelId = getAnnouncementChannelId();
-  if (!channelId) {
+  const channelIds = getAnnouncementChannelIds();
+  if (channelIds.length === 0) {
     console.warn('\n⚠️ [Cảnh báo] Chưa cấu hình kênh gửi thông báo.');
-    console.warn('Vui lòng thêm DISCORD_CHANNEL_ID vào file .env hoặc sử dụng lệnh Slash /setsyncchannel trong Discord.');
+    console.warn('Vui lòng thêm DISCORD_CHANNEL_ID vào file .env hoặc sử dụng lệnh Slash /chon-kenh trong Discord.');
     if (!forceCheck) return { checked: 0, posted: 0 };
   }
 
@@ -110,29 +110,31 @@ async function checkAndAnnounceNews(forceCheck = false) {
     }
 
     // If channel is configured, send the new articles
-    if (channelId) {
-      const channel = await client.channels.fetch(channelId).catch(err => {
-        console.error(`[Lỗi] Không thể truy cập kênh ${channelId}:`, err.message);
-        return null;
-      });
-
-      if (!channel) {
-        console.error(`[Lỗi] Không tìm thấy kênh ${channelId} hoặc bot không có quyền truy cập kênh này.`);
-        return { checked: articles.length, posted: 0 };
-      }
-
+    if (channelIds.length > 0) {
       for (const article of newArticles) {
         const embed = createArticleEmbed(article);
-        await channel.send({ embeds: [embed] }).catch(err => {
-          console.error(`[Lỗi] Không thể gửi tin nhắn đến kênh ${channelId}:`, err.message);
-        });
+        
+        for (const chId of channelIds) {
+          const channel = await client.channels.fetch(chId).catch(err => {
+            console.error(`[Lỗi] Không thể truy cập kênh ${chId}:`, err.message);
+            return null;
+          });
+
+          if (channel) {
+            await channel.send({ embeds: [embed] }).catch(err => {
+              console.error(`[Lỗi] Không thể gửi tin nhắn đến kênh ${chId}:`, err.message);
+            });
+          } else {
+             console.error(`[Lỗi] Không tìm thấy kênh ${chId} hoặc bot không có quyền truy cập kênh này.`);
+          }
+        }
         
         // Save sent article
         sentUrls.push(article.url);
       }
       
       saveSentArticles(sentUrls);
-      console.log(`[Thông báo] Đã gửi thành công ${newArticles.length} bài đăng mới vào kênh.`);
+      console.log(`[Thông báo] Đã gửi thành công ${newArticles.length} bài đăng mới vào ${channelIds.length} kênh.`);
     }
 
     return { checked: articles.length, posted: newArticles.length };
@@ -148,8 +150,8 @@ async function checkAndAnnounceNews(forceCheck = false) {
 async function registerSlashCommands() {
   const commands = [
     new SlashCommandBuilder()
-      .setName('setsyncchannel')
-      .setDescription('Đặt kênh văn bản nhận thông báo sự kiện / tin tức mới')
+      .setName('chon-kenh')
+      .setDescription('Chọn kênh văn bản để nhận thông báo sự kiện / tin tức mới')
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
       .addChannelOption(option => 
         option.setName('channel')
@@ -167,22 +169,27 @@ async function registerSlashCommands() {
   const rest = new REST({ version: '10' }).setToken(token);
 
   try {
-    console.log('[Slash Commands] Đang cập nhật danh sách lệnh trong Máy chủ...');
-    await rest.put(
-      Routes.applicationGuildCommands(clientId, guildId),
-      { body: commands }
-    );
-    console.log('[Slash Commands] Cập nhật danh sách lệnh thành công!');
-  } catch (error) {
-    if (error.code === 50001) {
-      console.warn('\n⚠️ [Lưu ý] Bot thiếu quyền đăng ký lệnh Slash (Missing Access).');
-      console.warn('Lý do: Khi mời Bot vào máy chủ, bạn chưa bật quyền "applications.commands".');
-      console.warn('Cách khắc phục: Mời lại Bot bằng link dưới đây và tích chọn cả "bot" và "applications.commands":');
-      console.warn(`👉 Link mời: https://discord.com/api/oauth2/authorize?client_id=${clientId}&permissions=274877910016&scope=bot%20applications.commands\n`);
-      console.warn('Gợi ý: Bot vẫn hoạt động bình thường, bạn có thể tự cấu hình ID kênh trực tiếp trong file `.env` bằng biến `DISCORD_CHANNEL_ID`.');
-    } else {
-      console.error('[Slash Commands Error] Không thể đăng ký lệnh:', error.message);
+    console.log('[Slash Commands] Đang cập nhật danh sách lệnh cho các Máy chủ...');
+    
+    // Register commands for all servers the bot is currently in
+    const guilds = client.guilds.cache;
+    for (const [gId, guild] of guilds) {
+      try {
+        await rest.put(
+          Routes.applicationGuildCommands(clientId, gId),
+          { body: commands }
+        );
+        console.log(`[Slash Commands] Cập nhật thành công cho máy chủ: ${guild.name} (${gId})`);
+      } catch (err) {
+        if (err.code === 50001) {
+          console.warn(`\n⚠️ [Lưu ý] Bot thiếu quyền "applications.commands" ở máy chủ: ${guild.name}`);
+        } else {
+          console.error(`[Slash Commands Error] Không thể đăng ký lệnh cho ${guild.name}:`, err.message);
+        }
+      }
     }
+  } catch (error) {
+    console.error('[Slash Commands Error] Lỗi hệ thống khi đăng ký lệnh:', error.message);
   }
 }
 
@@ -225,21 +232,24 @@ client.on('interactionCreate', async interaction => {
   const { commandName } = interaction;
 
   try {
-    if (commandName === 'setsyncchannel') {
+    if (commandName === 'chon-kenh') {
       const channel = interaction.options.getChannel('channel');
       
-      // Check if it's a text channel (type 0 is GuildText)
-      if (channel.type !== 0) {
+      if (channel.type !== 0 && channel.type !== 5) {
         return interaction.reply({
-          content: '❌ Vui lòng chọn một **kênh văn bản** (Text Channel).',
+          content: '❌ Vui lòng chọn một **kênh văn bản** (Text/Announcement Channel).',
           ephemeral: true
         });
       }
 
-      saveConfig({ channelId: channel.id });
+      const config = loadConfig();
+      if (!config.channelIds.includes(channel.id)) {
+        config.channelIds.push(channel.id);
+        saveConfig(config);
+      }
       
       return interaction.reply({
-        content: `✅ Đã thiết lập kênh thông báo tin tức là <#${channel.id}>. Các sự kiện mới sẽ tự động được gửi vào đây!`,
+        content: `✅ Đã thêm kênh thông báo tin tức: <#${channel.id}>. Các sự kiện mới sẽ tự động được gửi vào đây!`,
         ephemeral: false
       });
     }
@@ -255,14 +265,14 @@ client.on('interactionCreate', async interaction => {
       
       try {
         const result = await checkAndAnnounceNews(true);
-        const channelId = getAnnouncementChannelId();
+        const channelIds = getAnnouncementChannelIds();
         
         let replyMessage = `🔍 Đã hoàn thành kiểm tra tin tức!\n- Tìm thấy tổng cộng: **${result.checked}** bài viết trên trang chủ.`;
         
-        if (!channelId) {
-          replyMessage += `\n⚠️ **Cảnh báo**: Chưa cấu hình kênh thông báo. Hãy dùng lệnh \`/setsyncchannel\` hoặc cấu hình trong file \`.env\` để nhận thông báo.`;
+        if (channelIds.length === 0) {
+          replyMessage += `\n⚠️ **Cảnh báo**: Chưa cấu hình kênh thông báo. Hãy dùng lệnh \`/chon-kenh\` hoặc cấu hình trong file \`.env\` để nhận thông báo.`;
         } else {
-          replyMessage += `\n- Số bài đăng mới đã được gửi: **${result.posted}**`;
+          replyMessage += `\n- Số bài đăng mới đã được gửi: **${result.posted}** (Tới ${channelIds.length} kênh)`;
         }
 
         await interaction.editReply({ content: replyMessage });
@@ -277,7 +287,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (commandName === 'status') {
-      const channelId = getAnnouncementChannelId();
+      const channelIds = getAnnouncementChannelIds();
       const sentArticles = loadSentArticles();
       
       const statusEmbed = new EmbedBuilder()
@@ -286,7 +296,7 @@ client.on('interactionCreate', async interaction => {
         .addFields(
           { 
             name: 'Kênh thông báo', 
-            value: channelId ? `<#${channelId}>` : '❌ Chưa cấu hình (Dùng `/setsyncchannel` hoặc .env)', 
+            value: channelIds.length > 0 ? channelIds.map(id => `<#${id}>`).join(', ') : '❌ Chưa cấu hình (Dùng `/chon-kenh` hoặc .env)', 
             inline: false 
           },
           { 
