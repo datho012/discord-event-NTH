@@ -193,12 +193,59 @@ async function registerSlashCommands() {
   }
 }
 
+/**
+ * Scans configured channels' recent messages and adds previously sent article URLs
+ * to sent_articles.json to prevent re-uploading on wake-up.
+ */
+async function syncSentArticlesFromChannels() {
+  console.log('[Startup] Đang quét lịch sử các kênh để đồng bộ danh sách bài đã đăng...');
+  const channelIds = getAnnouncementChannelIds();
+  if (channelIds.length === 0) return;
+
+  const sentUrls = loadSentArticles();
+  let updated = false;
+
+  for (const chId of channelIds) {
+    try {
+      const channel = await client.channels.fetch(chId);
+      if (!channel) continue;
+
+      // Lấy 50 tin nhắn gần nhất
+      const messages = await channel.messages.fetch({ limit: 50 });
+      
+      messages.forEach(msg => {
+        // Kiểm tra xem tin nhắn có phải do bot gửi và có embed không
+        if (msg.author.id === client.user.id && msg.embeds.length > 0) {
+          for (const embed of msg.embeds) {
+            if (embed.url && !sentUrls.includes(embed.url)) {
+              sentUrls.push(embed.url);
+              updated = true;
+            }
+          }
+        }
+      });
+    } catch (err) {
+      console.error(`[Lỗi] Không thể quét lịch sử kênh ${chId}:`, err.message);
+    }
+  }
+
+  if (updated) {
+    saveSentArticles(sentUrls);
+    console.log(`[Startup] Đã đồng bộ thêm các bài viết cũ vào sent_articles.json.`);
+  } else {
+    console.log(`[Startup] Không có bài viết mới nào cần đồng bộ từ lịch sử kênh.`);
+  }
+}
+
 // Bot startup handlers
 client.once('clientReady', async () => {
   console.log(`[Bot] Đã đăng nhập thành công với tên: ${client.user.tag}!`);
   
   // Register slash commands for the specified guild
   await registerSlashCommands();
+
+  // Đồng bộ bài viết từ lịch sử kênh trước để tránh reup
+  await syncSentArticlesFromChannels();
 
   // Setup cron job for checking news
   setupScheduler();
